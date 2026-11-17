@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 # EchoMind
 
@@ -226,8 +226,7 @@ Never commit `config.h`. It holds your Wi-Fi password. `.gitignore` already excl
 
 ## Credits
 
-- Original project by [ChaitanyaT002](https://github.com/ChaitanyaT002/Echo).
-- This fork: local Qwen3.5 uncensored model, tuned voice detection, longer replies.
+- Built by [PRITESH-95](https://github.com/PRITESH-95).
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [Kokoro ONNX](https://github.com/thewh1teagle/kokoro-onnx), [Ollama](https://ollama.com), [HauhauCS Qwen3.5 4B](https://huggingface.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive).
 
 ## License
