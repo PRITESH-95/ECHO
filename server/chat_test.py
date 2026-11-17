@@ -1,7 +1,7 @@
-import re
+﻿import re
 import ollama
 
-MODEL = "llama3.2:1b"
+MODEL = "hf.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive:Q8_0"
 
 SYSTEM = (
     "You are Buddy, a friendly voice assistant. "
@@ -18,7 +18,7 @@ while True:
         break
 
     history.append({"role": "user", "content": q})
-    r = ollama.chat(model=MODEL, messages=history)
+    r = ollama.chat(model=MODEL, think=False, messages=history)
     text = r["message"]["content"]
     history.append({"role": "assistant", "content": text})
 

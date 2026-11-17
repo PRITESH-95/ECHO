@@ -1,6 +1,29 @@
+<div align="center">
+
 # EchoMind
 
-EchoMind is a voice AI assistant built on a plain ESP32. The ESP32 listens through an I2S microphone, streams audio over Wi-Fi (WebSocket) to a laptop, and plays the reply through an I2S amplifier and speaker. A small OLED shows the assistant's emotion. All AI processing (speech-to-text, LLM, text-to-speech) runs locally on the laptop, so no cloud API or API key is needed.
+**A fully local voice AI assistant on a plain ESP32.**
+Mic in, local STT + LLM + TTS on your laptop, speaker and OLED emotion face out. No cloud, no API keys.
+
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![ESP32](https://img.shields.io/badge/ESP32-Arduino-E7352C?logo=espressif&logoColor=white)
+![Ollama](https://img.shields.io/badge/LLM-Ollama-000000)
+![STT](https://img.shields.io/badge/STT-faster--whisper-blue)
+![TTS](https://img.shields.io/badge/TTS-Kokoro-purple)
+![Platform](https://img.shields.io/badge/Laptop-Windows-0078D6?logo=windows&logoColor=white)
+
+</div>
+
+---
+
+## Features
+
+- **100% local and private:** speech-to-text, the LLM and text-to-speech all run on your laptop.
+- **Uncensored local LLM:** runs [Qwen3.5-4B Uncensored (HauhauCS)](https://huggingface.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive) through Ollama. Swap in any Ollama model.
+- **Pick a model for your GPU:** quantizations from 2.6 GB to 7.9 GB, see [Choose your model](#2-choose-your-model).
+- **Emotion display:** the OLED face changes with the reply (happy, sad, thinking, surprised, neutral).
+- **Fast replies:** the answer is spoken sentence by sentence while the rest is still generating.
+- **Test without hardware:** `fake_esp32.py` simulates the ESP32 so you can try the whole pipeline on the laptop.
 
 ## How it works
 
@@ -9,7 +32,7 @@ ESP32 (INMP441 mic)
       |  audio over WebSocket (Wi-Fi)
       v
 Laptop server (Python)
-  faster-whisper (STT) -> Ollama llama3.2:1b (LLM) -> Kokoro (TTS)
+  faster-whisper (STT) -> Ollama LLM -> Kokoro (TTS)
       |  reply audio + emotion over WebSocket
       v
 ESP32 (MAX98357A amp + speaker, OLED emotion face)
@@ -18,9 +41,9 @@ ESP32 (MAX98357A amp + speaker, OLED emotion face)
 | Stage | Tool | Runs on |
 |---|---|---|
 | Microphone capture | INMP441 (I2S) | ESP32 |
-| Speech-to-text | faster-whisper (`base.en` model) | Laptop |
-| Language model | Ollama, `llama3.2:1b` | Laptop |
-| Text-to-speech | Kokoro | Laptop |
+| Speech-to-text | faster-whisper (`base.en`) | Laptop |
+| Language model | Ollama (default: Qwen3.5-4B Uncensored, Q8_0) | Laptop |
+| Text-to-speech | Kokoro (`af_heart` voice) | Laptop |
 | Audio playback | MAX98357A + speaker | ESP32 |
 | Emotion display | 0.96" OLED (SSD1306, 128x64) | ESP32 |
 
@@ -29,149 +52,184 @@ ESP32 (MAX98357A amp + speaker, OLED emotion face)
 | Part | Status |
 |---|---|
 | Laptop voice loop (STT -> LLM -> TTS) | Working |
-| OLED display | Working |
+| OLED emotion display | Working |
 | ESP32 microphone streaming | In progress |
 | Wake word | Planned |
 | ESP32 firmware | I2S / OLED hardware test only |
 
-Update this table as you finish each part.
+## Quick start (Windows, PowerShell)
 
-## Hardware required
+### 1. Install Ollama
+
+```powershell
+winget install Ollama.Ollama
+```
+
+No winget? Download it from https://ollama.com/download. **Restart PowerShell afterwards**, then check with `ollama --version`.
+
+### 2. Choose your model
+
+The default is **Q8_0**. Pick the file that fits your GPU, then pull it (the download shows a progress bar):
+
+| Your GPU VRAM | Pick | Size | Notes |
+|---|---|---|---|
+| CPU only or 2-4 GB | `Q4_K_M` | 2.6 GB | Fastest, lowest memory use |
+| 4-6 GB | `Q6_K` | 3.3 GB | Good balance |
+| 6-8 GB (RTX 4050 class) | `Q8_0` | 4.2 GB | Best quality that fits in 6 GB. Default. |
+| 12 GB+ | `BF16` | 7.9 GB | Full precision, rarely worth it for voice |
+
+Sizes are file sizes. Leave some VRAM free for context. For voice, a smaller quant means faster replies. Other sizes (like the 9B) are on the [HauhauCS Hugging Face page](https://huggingface.co/HauhauCS).
+
+```powershell
+ollama pull hf.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive:Q8_0
+```
+
+Swap `Q8_0` for your pick. If you choose a different quant, set the same name in `LLM = "..."` at the top of `server/server.py` and `server/buddy.py`.
+
+> The model also ships a vision file (`mmproj`). Echo is text-only, so you do not need it.
+
+### 3. Clone and install dependencies
+
+```powershell
+git clone https://github.com/PRITESH-95/ECHO.git
+cd ECHO\server
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+pip install -U ollama
+```
+
+### 4. Download the Kokoro voice files (once)
+
+```powershell
+curl.exe -L -O https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+curl.exe -L -O https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+```
+
+### 5. Start the server
+
+Keep Ollama running in the background, then:
+
+```powershell
+python server.py
+```
+
+The first start downloads the Whisper model (~145 MB) and loads everything, so it takes a while. When you see `Server ready: ws://<your-ip>:8765`, it is up.
+
+### 6. Test without hardware
+
+In a second PowerShell window:
+
+```powershell
+cd ECHO\server; python fake_esp32.py
+```
+
+## ESP32 setup
+
+> The `firmware` folder currently holds an I2S audio and OLED hardware test. Wi-Fi/WebSocket streaming from the ESP32 is still in progress.
+
+1. Install the [Arduino IDE](https://www.arduino.cc/en/software) and add ESP32 board support (Boards Manager, "esp32" by Espressif).
+2. Install `U8g2` and a WebSocket client library such as `WebSockets` by Markus Sattler.
+3. Put your Wi-Fi details and the laptop address (`ws://<your-ip>:8765`) in a local `config.h`. **Never commit it.**
+4. Select **ESP32 Dev Module**, pick the COM port, and upload. If it stalls at "Connecting...", hold **BOOT**.
+5. Laptop and ESP32 must be on the same Wi-Fi network.
+
+### Hardware
 
 - ESP32 dev module (plain ESP32, not S3)
 - INMP441 I2S microphone
 - MAX98357A I2S amplifier + speaker
 - 0.96" I2C OLED (128x64)
-- Breadboard and jumper wires
-- USB cable
+- Breadboard, jumper wires, USB cable
 
-## Wiring
+### Wiring
 
-These are example pins. Change them to match the pin definitions in your firmware.
+Example pins. Match them to the pin definitions in your firmware.
 
 | Module pin | ESP32 pin |
 |---|---|
-| INMP441 VDD | 3V3 |
-| INMP441 GND | GND |
+| INMP441 VDD / GND | 3V3 / GND |
 | INMP441 SCK | GPIO 14 |
 | INMP441 WS | GPIO 15 |
 | INMP441 SD | GPIO 32 |
 | INMP441 L/R | GND |
-| MAX98357A VIN | 5V (VIN) |
-| MAX98357A GND | GND |
+| MAX98357A VIN / GND | 5V (VIN) / GND |
 | MAX98357A BCLK | GPIO 26 |
 | MAX98357A LRC | GPIO 25 |
 | MAX98357A DIN | GPIO 27 |
-| OLED VCC | 3V3 |
-| OLED GND | GND |
+| OLED VCC / GND | 3V3 / GND |
 | OLED SDA | GPIO 21 |
 | OLED SCL | GPIO 22 |
 
-## Folder structure
+## Configuration
 
-Rename the paths below if your files are named differently.
+Settings are at the top of `server/server.py`:
+
+| Setting | What it does |
+|---|---|
+| `LLM` | Ollama model name |
+| `VOICE` | Kokoro voice (default `af_heart`) |
+| `THRESH` | Mic loudness needed to count as speech. Lower it if Echo cannot hear you. |
+| `SILENCE_END` | Seconds of silence before your sentence is considered finished |
+| `SYSTEM` | Personality and reply length. Edit this to change how Echo talks. |
+
+The code calls the model with `think=False` to skip the model's long reasoning step, which keeps voice replies fast. This needs the `ollama` Python package 0.6 or newer.
+
+## Project structure
 
 ```
-Echo/
-├── firmware/            # ESP32 code (Arduino / PlatformIO)
-│   └── echo_firmware/
-│       ├── echo_firmware.ino
-│       └── config.example.h
-├── server/              # Laptop code (Python)
-│   ├── server.py
-│   └── requirements.txt
-├── .gitignore
-└── README.md
+ECHO/
++-- firmware/
+|   +-- echo_firmware/
+|       +-- echo_firmware.ino   # ESP32 I2S + OLED test
++-- server/
+|   +-- server.py               # WebSocket server: STT -> LLM -> TTS
+|   +-- buddy.py                # Terminal version with timing output
+|   +-- fake_esp32.py           # Simulated ESP32 for testing
+|   +-- chat_test.py            # LLM-only test
+|   +-- stt_test.py             # Speech-to-text test
+|   +-- tts_test.py             # Text-to-speech test
+|   +-- kokoro_test.py          # Kokoro voice test
+|   +-- requirements.txt
++-- .gitignore
++-- LICENSE
++-- README.md
 ```
 
-## Setup and run
-
-You need two things running: the laptop server first, then the ESP32.
-
-### 1. Laptop server
-
-Requirements: Python 3.11, [Ollama](https://ollama.com), and a Wi-Fi network shared with the ESP32.
-
-```bash
-# Clone the repo
-git clone https://github.com/ChaitanyaT002/Echo.git
-cd Echo/server
-
-# Create and activate a virtual environment (Windows)
-python -m venv venv
-venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Download the language model (one time)
-ollama pull llama3.2:1b
-
-# Download Kokoro voice files (one time)
-curl.exe -L -O https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
-curl.exe -L -O https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
-
-# Start the server
-python server.py
-```
-
-On the first run, faster-whisper and Kokoro download their models automatically, so the first start takes longer. When the server is ready it listens for the ESP32 on a WebSocket port (check `server.py` for the exact port).
-
-Find your laptop's IP address with `ipconfig` (use the IPv4 address of your Wi-Fi adapter). You need it in the next step.
-
-### 2. ESP32 firmware
-
-> **Note:** the firmware folder currently holds only an I2S audio and OLED hardware test. Wi-Fi/WebSocket streaming from the ESP32 is not implemented yet, so the `config.h` step below applies once it is added.
-
-1. Install the [Arduino IDE](https://www.arduino.cc/en/software) and add ESP32 board support (Boards Manager -> "esp32" by Espressif).
-2. Install these libraries (Library Manager): `U8g2`, and a WebSocket client library such as `WebSockets` by Markus Sattler. Match the libraries used in your code.
-3. In `firmware/echo_firmware/`, copy `config.example.h` to `config.h` and fill in your details:
-
-```cpp
-#define WIFI_SSID     "your-wifi-name"
-#define WIFI_PASSWORD "your-wifi-password"
-#define SERVER_IP     "192.168.x.x"   // laptop IP from ipconfig
-#define SERVER_PORT   8765            // must match the port in server.py
-```
-
-4. Select **Tools -> Board -> ESP32 Dev Module** and choose the correct COM port.
-5. Click **Upload**. If upload stalls at "Connecting...", hold the **BOOT** button on the ESP32 until it starts.
-6. Open the Serial Monitor at 115200 baud to see the connection status.
-
-### 3. Use it
-
-1. Keep the server running on the laptop.
-2. Power the ESP32. It connects to Wi-Fi and then to the server.
-3. Speak to the assistant. The reply plays through the speaker and the OLED shows the emotion.
-
-## Quick run (Windows)
-
-After the one-time setup above, start the server with one command from the repo folder:
-
-```powershell
-cd Echo\server; .\venv\Scripts\python.exe server.py
-```
-
-This uses the virtual environment's Python directly, so you don't need to activate it. Keep Ollama running in the background. The server prints a `ws://<your-ip>:8765` address, and that is the address to put in the ESP32 config.
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| ESP32 cannot connect to the server | Laptop and ESP32 must be on the same Wi-Fi network. Check `SERVER_IP`, and allow Python through Windows Firewall (private networks). |
-| Microphone returns only zeros or noise | Check that INMP441 L/R is connected to GND, and check the SCK, WS and SD wiring against the pin definitions in the code. |
-| No sound from speaker | Check MAX98357A wiring and power it from 5V. Confirm the speaker is connected to the amp output. |
-| OLED stays blank | Confirm the I2C address (usually `0x3C`) and the SDA/SCL pins. |
-| Replies are slow | Use the `base` or `tiny` Whisper model and keep `llama3.2:1b`. Close other heavy programs, since the laptop has limited RAM. |
-| `ollama` command not found | Restart the terminal after installing Ollama, then run `ollama pull llama3.2:1b` again. |
+| `only one usage of each socket address` on start | An old server is still running. Free the port: `Get-NetTCPConnection -LocalPort 8765 -EA 0 \| % { Stop-Process -Id $_.OwningProcess -Force }` |
+| Echo does not hear me | Lower `THRESH` in `server.py` (try `0.005`) and speak close to the mic |
+| Replies are too short | Edit the reply-length rule and the examples in `SYSTEM` / `EXAMPLES` |
+| Replies are slow | Use a smaller quant (`Q4_K_M`) and close heavy programs |
+| Whisper download is stuck | `$env:HF_HUB_DISABLE_XET="1"` then run the server again |
+| `think` argument error | `pip install -U ollama` |
+| `ollama` not found | Restart PowerShell after installing Ollama |
+| ESP32 cannot connect | Same Wi-Fi, correct laptop IP, and allow Python through Windows Firewall (private networks) |
+| Mic returns zeros or noise | INMP441 L/R must go to GND. Check SCK, WS and SD wiring. |
+| No sound from speaker | Power the MAX98357A from 5V and check the speaker wires |
+| OLED is blank | Check the I2C address (usually `0x3C`) and the SDA/SCL pins |
 
-## Security note
+## Roadmap
 
-Never commit `config.h`. It contains your Wi-Fi password. Only `config.example.h` (with placeholder values) belongs in the repo, and `.gitignore` excludes `config.h`.
+- [x] Local STT -> LLM -> TTS loop
+- [x] OLED emotion display
+- [ ] ESP32 Wi-Fi + WebSocket audio streaming
+- [ ] Wake word detection
+- [ ] Interrupt a reply by speaking
 
-## Tech stack
+## Security
 
-ESP32 (C++ / Arduino), Python 3.11, WebSocket, faster-whisper, Ollama (llama3.2:1b), Kokoro TTS.
+Never commit `config.h`. It holds your Wi-Fi password. `.gitignore` already excludes it.
+
+## Credits
+
+- Original project by [ChaitanyaT002](https://github.com/ChaitanyaT002/Echo).
+- This fork: local Qwen3.5 uncensored model, tuned voice detection, longer replies.
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [Kokoro ONNX](https://github.com/thewh1teagle/kokoro-onnx), [Ollama](https://ollama.com), [HauhauCS Qwen3.5 4B](https://huggingface.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive).
 
 ## License
 
-Add a license of your choice (for example MIT) before sharing the project publicly.
+See [LICENSE](LICENSE).
