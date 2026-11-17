@@ -1,7 +1,9 @@
-import asyncio
+﻿import asyncio
 import json
+import queue as _queue
 import re
 import socket
+import threading
 import time
 from collections import deque
 
@@ -13,7 +15,7 @@ from kokoro_onnx import Kokoro
 
 # ---------- Settings ----------
 HOST, PORT = "0.0.0.0", 8765
-LLM = "llama3.2:1b"
+LLM = "hf.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive:Q8_0"
 VOICE = "af_heart"
 SR_IN = 16000
 THRESH = 0.015
@@ -59,7 +61,7 @@ for u, a in EXAMPLES:
                 {"role": "assistant", "content": a}]
 BASE = len(history)
 
-ollama.chat(model=LLM, messages=[{"role": "user", "content": "hi"}],
+ollama.chat(model=LLM, think=False, messages=[{"role": "user", "content": "hi"}],
             keep_alive="30m", options={"num_predict": 1})
 tts.create("Hi.", voice=VOICE, speed=1.0, lang="en-us")
 
@@ -76,7 +78,7 @@ def clean(s):
 
 def ask_llm_stream(text):
     history.append({"role": "user", "content": text})
-    stream = ollama.chat(model=LLM, messages=history, stream=True,
+    stream = ollama.chat(model=LLM, think=False, messages=history, stream=True,
                          keep_alive="30m", options={"num_predict": 100})
     buf, full, emotion, spoken = "", "", None, False
 
@@ -123,16 +125,34 @@ def ask_llm_stream(text):
 
 
 def worker(text, loop, q):
-    """LLM + TTS in a thread; pushes (emotion, sentence, pcm, rate) to the async side."""
+    """LLM streams sentences to a TTS thread; TTS pushes (emotion, sentence, pcm, rate) to the async side."""
+    tts_q = _queue.Queue()
+
+    def tts_thread():
+        while True:
+            item = tts_q.get()
+            if item is None:
+                loop.call_soon_threadsafe(q.put_nowait, None)
+                return
+            emotion, sentence = item
+            try:
+                audio, sr = tts.create(sentence, voice=VOICE, speed=1.0, lang="en-us")
+                pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes()
+                loop.call_soon_threadsafe(q.put_nowait, (emotion, sentence, pcm, sr))
+            except Exception as e:
+                print("tts error:", e)
+
+    t = threading.Thread(target=tts_thread, daemon=True)
+    t.start()
+
     try:
         for emotion, sentence in ask_llm_stream(text):
-            audio, sr = tts.create(sentence, voice=VOICE, speed=1.0, lang="en-us")
-            pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes()
-            loop.call_soon_threadsafe(q.put_nowait, (emotion, sentence, pcm, sr))
+            tts_q.put((emotion, sentence))
     except Exception as e:
         print("worker error:", e)
     finally:
-        loop.call_soon_threadsafe(q.put_nowait, None)
+        tts_q.put(None)
+        t.join()
 
 
 # ---------- Async side ----------

@@ -1,4 +1,4 @@
-import re
+﻿import re
 import time
 import queue
 import threading
@@ -9,7 +9,7 @@ from faster_whisper import WhisperModel
 from kokoro_onnx import Kokoro
 
 # ---------- Settings ----------
-LLM = "llama3.2:1b"
+LLM = "hf.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive:Q8_0"
 VOICE = "af_heart"
 SR = 16000
 BLOCK = int(0.1 * SR)
@@ -56,7 +56,7 @@ for u, a in EXAMPLES:
                 {"role": "assistant", "content": a}]
 BASE = len(history)                      # examples stay; only real turns get trimmed
 
-ollama.chat(model=LLM, messages=[{"role": "user", "content": "hi"}],
+ollama.chat(model=LLM, think=False, messages=[{"role": "user", "content": "hi"}],
             keep_alive="30m", options={"num_predict": 1})
 tts.create("Hi.", voice=VOICE, speed=1.0, lang="en-us")
 print("Ready. Press Ctrl+C to quit.\n")
@@ -137,7 +137,7 @@ def clean(s):
 def ask_llm_stream(text):
     """Yield (emotion, chunk). The first chunk may end at a comma for speed."""
     history.append({"role": "user", "content": text})
-    stream = ollama.chat(model=LLM, messages=history, stream=True,
+    stream = ollama.chat(model=LLM, think=False, messages=history, stream=True,
                          keep_alive="30m", options={"num_predict": 100})
     buf, full, emotion, spoken = "", "", None, False
 
