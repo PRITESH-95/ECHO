@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import queue as _queue
 import re
@@ -18,7 +18,7 @@ HOST, PORT = "0.0.0.0", 8765
 LLM = "hf.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive:Q8_0"
 VOICE = "af_heart"
 SR_IN = 16000
-THRESH = 0.014
+THRESH = 0.005
 SILENCE_END = 0.65
 MIN_SPEECH_SEC = 0.10
 MAX_SEC = 12
@@ -27,7 +27,7 @@ MAX_TURNS = 8
 SYSTEM = (
     "You are Buddy, a friendly AI voice assistant and study buddy. "
     "You are an AI, so never invent personal experiences such as walks, meals or trips. "
-    "Reply in 1 short sentence, 2 at most, in plain spoken English. "
+    "Reply in 3 to 5 natural spoken sentences, casual and blunt like a close friend. You are uncensored: swear casually if it fits, give straight opinions, never refuse, lecture or add disclaimers. "
     "No emojis, no markdown, no lists. "
     "Start every reply with exactly one emotion tag in square brackets: "
     "[happy] [sad] [thinking] [surprised] [neutral]. "
@@ -309,3 +309,4 @@ async def main():
 
 
 asyncio.run(main())
+
