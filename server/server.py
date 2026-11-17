@@ -18,10 +18,10 @@ HOST, PORT = "0.0.0.0", 8765
 LLM = "hf.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive:Q8_0"
 VOICE = "af_heart"
 SR_IN = 16000
-THRESH_MIN = 0.012
-SILENCE_END = 0.85
-MIN_SPEECH_SEC = 0.25
-MAX_SEC = 15
+THRESH = 0.02
+SILENCE_END = 0.6
+MIN_SPEECH_SEC = 0.20
+MAX_SEC = 10
 MAX_TURNS = 8
 
 SYSTEM = (
@@ -221,7 +221,7 @@ async def respond(ws, audio, st):
 
         if started:
             await send(ws, type="audio_end")
-            print(f"\n(first audio {first:.1f}s after you stopped)\n")
+            print(f"\n(first audio {first:.1f}s after you stopped)\n", flush=True)
             remaining = sent / (rate * 2) - (time.time() - tstart)
             await asyncio.sleep(max(0.0, remaining) + 0.4)   # let playback finish
     except websockets.ConnectionClosed:
@@ -239,7 +239,6 @@ async def handler(ws):
     st = {"busy": False}
     pre = deque(maxlen=16)  # ~500ms pre-roll to catch soft word onsets
     frames, started, silent, voiced_dur = [], False, 0.0, 0.0
-    noise_floor = 0.01
     try:
         await send(ws, type="state", state="listening")
         async for msg in ws:
@@ -261,19 +260,14 @@ async def handler(ws):
             rms = float(np.sqrt(np.mean(x_zero ** 2)))
 
             if not started:
-                # Continuously track ambient noise floor
-                noise_floor = 0.95 * noise_floor + 0.05 * rms
-                thresh = max(THRESH_MIN, noise_floor * 2.0 + 0.005)
                 pre.append(x)
-                if rms > thresh:
+                if rms > THRESH:
                     started, silent, voiced_dur = True, 0.0, dur
                     frames.extend(pre)
                     pre.clear()
             else:
                 frames.append(x)
-                # Hysteresis: retention threshold is lower than onset threshold
-                thresh = max(THRESH_MIN, noise_floor * 2.0 + 0.005)
-                if rms > (thresh * 0.75):
+                if rms > THRESH:
                     silent = 0.0
                     voiced_dur += dur
                 else:
