@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import json
 import queue as _queue
 import re
@@ -18,8 +18,9 @@ HOST, PORT = "0.0.0.0", 8765
 LLM = "hf.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive:Q8_0"
 VOICE = "af_heart"
 SR_IN = 16000
-THRESH = 0.015
-SILENCE_END = 0.7
+THRESH_MIN = 0.012
+SILENCE_END = 0.85
+MIN_SPEECH_SEC = 0.25
 MAX_SEC = 15
 MAX_TURNS = 8
 
@@ -68,8 +69,28 @@ tts.create("Hi.", voice=VOICE, speed=1.0, lang="en-us")
 
 # ---------- Blocking helpers (run in threads) ----------
 def transcribe(audio):
-    segs, _ = stt.transcribe(audio, language="en", beam_size=1, vad_filter=True)
-    return " ".join(s.text.strip() for s in segs).strip()
+    if len(audio) == 0:
+        return ""
+    # Remove DC offset
+    audio = audio - np.mean(audio)
+    # Peak normalization so Whisper hears soft or distant voices clearly
+    peak = float(np.max(np.abs(audio)))
+    if peak > 0.005:
+        audio = audio * (0.95 / max(peak, 0.08))
+
+    segs, _ = stt.transcribe(
+        audio,
+        language="en",
+        beam_size=1,
+        vad_filter=True,
+        vad_parameters=dict(threshold=0.35, min_silence_duration_ms=400, speech_pad_ms=250),
+    )
+    text = " ".join(s.text.strip() for s in segs).strip()
+    if not text:
+        # Fallback without vad_filter in case Silero VAD was overly aggressive on soft speech
+        segs, _ = stt.transcribe(audio, language="en", beam_size=1, vad_filter=False)
+        text = " ".join(s.text.strip() for s in segs).strip()
+    return text
 
 
 def clean(s):
@@ -216,8 +237,9 @@ async def respond(ws, audio, st):
 async def handler(ws):
     print("Client connected:", ws.remote_address)
     st = {"busy": False}
-    pre = deque(maxlen=6)
-    frames, started, silent = [], False, 0.0
+    pre = deque(maxlen=16)  # ~500ms pre-roll to catch soft word onsets
+    frames, started, silent, voiced_dur = [], False, 0.0, 0.0
+    noise_floor = 0.01
     try:
         await send(ws, type="state", state="listening")
         async for msg in ws:
@@ -226,30 +248,47 @@ async def handler(ws):
                 continue
             if st["busy"]:                      # half-duplex: ignore mic while replying
                 pre.clear()
-                frames, started, silent = [], False, 0.0
+                frames, started, silent, voiced_dur = [], False, 0.0, 0.0
                 continue
 
             x = np.frombuffer(msg, dtype=np.int16).astype(np.float32) / 32768.0
             if len(x) == 0:
                 continue
             dur = len(x) / SR_IN
-            rms = float(np.sqrt(np.mean(x ** 2)))
+
+            # Remove DC bias to measure pure AC audio energy
+            x_zero = x - np.mean(x)
+            rms = float(np.sqrt(np.mean(x_zero ** 2)))
 
             if not started:
+                # Continuously track ambient noise floor
+                noise_floor = 0.95 * noise_floor + 0.05 * rms
+                thresh = max(THRESH_MIN, noise_floor * 2.0 + 0.005)
                 pre.append(x)
-                if rms > THRESH:
-                    started, silent = True, 0.0
+                if rms > thresh:
+                    started, silent, voiced_dur = True, 0.0, dur
                     frames.extend(pre)
                     pre.clear()
             else:
                 frames.append(x)
-                silent = silent + dur if rms < THRESH else 0.0
+                # Hysteresis: retention threshold is lower than onset threshold
+                thresh = max(THRESH_MIN, noise_floor * 2.0 + 0.005)
+                if rms > (thresh * 0.75):
+                    silent = 0.0
+                    voiced_dur += dur
+                else:
+                    silent += dur
+
                 total = sum(len(f) for f in frames) / SR_IN
                 if silent >= SILENCE_END or total > MAX_SEC:
-                    audio = np.concatenate(frames)
-                    frames, started, silent = [], False, 0.0
-                    st["busy"] = True
-                    asyncio.create_task(respond(ws, audio, st))
+                    if voiced_dur >= MIN_SPEECH_SEC:
+                        audio = np.concatenate(frames)
+                        frames, started, silent, voiced_dur = [], False, 0.0, 0.0
+                        st["busy"] = True
+                        asyncio.create_task(respond(ws, audio, st))
+                    else:
+                        # Ignore transient noise spikes (clicks, pops, typing) without pausing
+                        frames, started, silent, voiced_dur = [], False, 0.0, 0.0
     except websockets.ConnectionClosed:
         pass
     finally:
