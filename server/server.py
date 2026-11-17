@@ -18,10 +18,10 @@ HOST, PORT = "0.0.0.0", 8765
 LLM = "hf.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive:Q8_0"
 VOICE = "af_heart"
 SR_IN = 16000
-THRESH = 0.02
-SILENCE_END = 0.6
-MIN_SPEECH_SEC = 0.20
-MAX_SEC = 10
+THRESH = 0.014
+SILENCE_END = 0.65
+MIN_SPEECH_SEC = 0.10
+MAX_SEC = 12
 MAX_TURNS = 8
 
 SYSTEM = (
@@ -220,10 +220,11 @@ async def respond(ws, audio, st):
                     tstart = time.time() - sent / (rate * 2)
 
         if started:
+            remaining = sent / (rate * 2) - (time.time() - tstart)
+            if remaining > 0:
+                await asyncio.sleep(remaining)
             await send(ws, type="audio_end")
             print(f"\n(first audio {first:.1f}s after you stopped)\n", flush=True)
-            remaining = sent / (rate * 2) - (time.time() - tstart)
-            await asyncio.sleep(max(0.0, remaining) + 0.4)   # let playback finish
     except websockets.ConnectionClosed:
         pass
     finally:
